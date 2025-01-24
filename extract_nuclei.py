@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from skimage import io, measure, morphology, exposure, filters, transform
 
 
-def extract_nuclei(pred_mask_path, min_size=50):
+def label_nuclei(pred_mask_path, min_size=50):
     # Load predicted mask
     pred_mask = io.imread(pred_mask_path)
 
@@ -25,7 +25,7 @@ def extract_nuclei(pred_mask_path, min_size=50):
     return labeled_nuclei
 
 
-def preprocess_nuclei(segmented_nuclei, output_dir='processed_nuclei', image_name=''):
+def crop_nuclei(segmented_nuclei, output_dir='processed_nuclei', image_name=''):
     os.makedirs(output_dir, exist_ok=True)
 
     for nucleus_label in np.unique(segmented_nuclei):
@@ -70,8 +70,8 @@ def process_all_predictions(pred_masks_dir, output_dir):
     for pred_mask_file in pred_mask_files:
         pred_mask_path = os.path.join(pred_masks_dir, pred_mask_file)
 
-        # Extract nuclei
-        segmented_nuclei = extract_nuclei(pred_mask_path)
+        # Label nuclei
+        segmented_nuclei = label_nuclei(pred_mask_path)
 
         # Optional: Visualize the result
         plt.figure()
@@ -79,8 +79,8 @@ def process_all_predictions(pred_masks_dir, output_dir):
         plt.imshow(segmented_nuclei, cmap='nipy_spectral')
         plt.show()
 
-        # Preprocess and save individual nuclei
-        preprocess_nuclei(segmented_nuclei,
+        # Preprocess, crop and save individual nuclei
+        crop_nuclei(segmented_nuclei,
                           output_dir=output_dir,
                           image_name=os.path.splitext(pred_mask_file)[0])
 
