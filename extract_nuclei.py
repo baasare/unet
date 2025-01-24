@@ -1,48 +1,93 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage import io, measure, morphology, transform
+from skimage import io, measure, morphology, exposure, filters, transform
+
 
 def extract_nuclei(pred_mask_path, min_size=50):
     # Load predicted mask
     pred_mask = io.imread(pred_mask_path)
-    pred_mask = pred_mask > 127  # Convert to binary (threshold = 127)
+
+    # Handle grayscale vs binary images
+    if pred_mask.ndim == 3:
+        pred_mask = pred_mask[:, :, 0]  # Take first channel if multi-channel
+
+    # Use Otsu thresholding for more robust binarization
+    thresh = filters.threshold_otsu(pred_mask)
+    binary_mask = pred_mask > thresh
 
     # Label connected components
-    labeled_nuclei = measure.label(pred_mask)
+    labeled_nuclei = measure.label(binary_mask)
 
     # Remove small objects (noise)
     # cleaned_nuclei = morphology.remove_small_objects(labeled_nuclei, min_size=min_size)
 
     return labeled_nuclei
 
-def preprocess_nuclei(segmented_nuclei, output_dir='processed_nuclei'):
+
+def preprocess_nuclei(segmented_nuclei, output_dir='processed_nuclei', image_name=''):
     os.makedirs(output_dir, exist_ok=True)
 
-    # Extract individual nuclei from the segmented mask
     for nucleus_label in np.unique(segmented_nuclei):
         if nucleus_label == 0:  # Skip background
             continue
 
         # Create a binary mask for the current nucleus
-        nucleus_mask = (segmented_nuclei == nucleus_label).astype(np.uint8)
+        nucleus_mask = (segmented_nuclei == nucleus_label)
 
-        # Resize to 128x128
-        nucleus_resized = transform.resize(nucleus_mask, (128, 128), anti_aliasing=True)
+        # Compute bounding box to crop nucleus
+        rows = np.any(nucleus_mask, axis=1)
+        cols = np.any(nucleus_mask, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
 
-        # Save as an image
-        io.imsave(f'{output_dir}/nucleus_{nucleus_label}.png', (nucleus_resized * 255).astype(np.uint8))
+        # Crop the nucleus
+        nucleus_crop = nucleus_mask[rmin:rmax + 1, cmin:cmax + 1]
+
+        # Resize to 128x128 with anti-aliasing
+        nucleus_resized = transform.resize(nucleus_crop.astype(float),
+                                           (128, 128),
+                                           anti_aliasing=True,
+                                           preserve_range=True)
+
+        # Normalize to improve contrast
+        nucleus_norm = exposure.equalize_adapthist(nucleus_resized)
+
+        # Save as an image with original filename context
+        io.imsave(f'{output_dir}/{image_name}_nucleus_{nucleus_label}.png',
+                  (nucleus_norm * 255).astype(np.uint8),
+                  check_contrast=False)
+
+
+def process_all_predictions(pred_masks_dir, output_dir):
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get all prediction mask files
+    pred_mask_files = [f for f in os.listdir(pred_masks_dir) if f.endswith('_pred.png')]
+
+    # Process each prediction mask
+    for pred_mask_file in pred_mask_files:
+        pred_mask_path = os.path.join(pred_masks_dir, pred_mask_file)
+
+        # Extract nuclei
+        segmented_nuclei = extract_nuclei(pred_mask_path)
+
+        # Optional: Visualize the result
+        plt.figure()
+        plt.title(f'Segmented Nuclei: {pred_mask_file}')
+        plt.imshow(segmented_nuclei, cmap='nipy_spectral')
+        plt.show()
+
+        # Preprocess and save individual nuclei
+        preprocess_nuclei(segmented_nuclei,
+                          output_dir=output_dir,
+                          image_name=os.path.splitext(pred_mask_file)[0])
 
 
 if __name__ == '__main__':
-    # Path to a predicted mask
-    pred_mask_path = 'images/preds/img_pred.png'
+    pred_masks_dir = 'images/preds'
+    processed_nuclei_dir = 'images/processed_nuclei'
 
-    # Extract nuclei
-    segmented_nuclei = extract_nuclei(pred_mask_path)
-
-    # Visualize the result
-    plt.imshow(segmented_nuclei, cmap='nipy_spectral')
-    plt.show()
-
-    preprocess_nuclei(segmented_nuclei, output_dir='images/processed_nuclei')
+    # Process all prediction masks
+    process_all_predictions(pred_masks_dir, processed_nuclei_dir)
